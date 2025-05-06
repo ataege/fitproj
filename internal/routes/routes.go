@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"github.com/ataege/fitproj/internal/handlers"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -17,4 +18,10 @@ func setupPublicRoutes(router fiber.Router) {
 			"message": "Service is healthy",
 		})
 	})
+
+	// File routes
+	router.Post("/upload", handlers.UploadFile)
+	router.Post("/upload/multiple", handlers.UploadMultipleFiles)
+	router.Get("/files", handlers.ListFiles)
+	router.Get("/files/:filename", handlers.DownloadFile)
 }
