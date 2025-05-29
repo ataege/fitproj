@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -24,7 +25,6 @@ func GetHello(c *fiber.Ctx) error {
 	})
 }
 
-// UploadFile handles file uploads and saves them to the uploads directory
 func UploadFile(c *fiber.Ctx) error {
 	// Get the file from the request
 	file, err := c.FormFile("file")
@@ -36,7 +36,6 @@ func UploadFile(c *fiber.Ctx) error {
 		})
 	}
 
-	// Create uploads directory if it doesn't exist
 	uploadDir := "./uploads"
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -46,12 +45,10 @@ func UploadFile(c *fiber.Ctx) error {
 		})
 	}
 
-	// Generate a unique filename to prevent overwriting existing files
 	timestamp := time.Now().Unix()
 	uniqueFilename := fmt.Sprintf("%d_%s", timestamp, file.Filename)
 	filePath := filepath.Join(uploadDir, uniqueFilename)
 
-	// Save the file
 	if err := c.SaveFile(file, filePath); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"status":  "error",
@@ -60,8 +57,25 @@ func UploadFile(c *fiber.Ctx) error {
 		})
 	}
 
-	// Return the file path to the client
-	return c.JSON(fiber.Map{
+	var midiOutput string
+	var cmdErr error
+	if filepath.Ext(uniqueFilename) == ".wav" {
+		outputFilename := uniqueFilename[:len(uniqueFilename)-len(".wav")] + "_midi.wav"
+		outputPath := filepath.Join(uploadDir, outputFilename)
+
+		venvPython := "/venv/bin/python"
+		pythonPath := venvPython
+		if _, err := os.Stat(venvPython); os.IsNotExist(err) {
+			pythonPath = "python"
+		}
+
+		cmd := exec.Command(pythonPath, "audio2midi.py", filePath, outputPath)
+		cmd.Dir = "./"
+		cmdErr = cmd.Run()
+		midiOutput = outputPath
+	}
+
+	resp := fiber.Map{
 		"status":  "success",
 		"message": "File uploaded successfully",
 		"data": fiber.Map{
@@ -69,7 +83,19 @@ func UploadFile(c *fiber.Ctx) error {
 			"size":     file.Size,
 			"path":     filePath,
 		},
-	})
+	}
+
+	if filepath.Ext(uniqueFilename) == ".wav" {
+		resp["audio2midi"] = fiber.Map{
+			"output_file": midiOutput,
+			"error":       nil,
+		}
+		if cmdErr != nil {
+			resp["audio2midi"].(fiber.Map)["error"] = cmdErr.Error()
+		}
+	}
+
+	return c.JSON(resp)
 }
 
 // UploadMultipleFiles handles multiple file uploads
