@@ -31,3 +31,4 @@ go.work
 # Binary output
 bin/
 /fitproj
+/uploads

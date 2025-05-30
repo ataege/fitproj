@@ -1,13 +1,14 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gorilla/websocket"
 )
 
 // GetHealth returns the health status of the API
@@ -57,22 +58,53 @@ func UploadFile(c *fiber.Ctx) error {
 		})
 	}
 
-	var midiOutput string
-	var cmdErr error
+	var wsResp interface{}
+	var wsErr error
+	fmt.Print(uniqueFilename)
 	if filepath.Ext(uniqueFilename) == ".wav" {
-		outputFilename := uniqueFilename[:len(uniqueFilename)-len(".wav")] + "_midi.wav"
+		outputFilename := uniqueFilename[:len(uniqueFilename)-len(".wav")] + "_midi.mid"
 		outputPath := filepath.Join(uploadDir, outputFilename)
 
-		venvPython := "/venv/bin/python"
-		pythonPath := venvPython
-		if _, err := os.Stat(venvPython); os.IsNotExist(err) {
-			pythonPath = "python"
+		absInput, err := filepath.Abs(filePath)
+		if err != nil {
+			absInput = filePath
+		}
+		absOutput, err := filepath.Abs(outputPath)
+		if err != nil {
+			absOutput = outputPath
 		}
 
-		cmd := exec.Command(pythonPath, "audio2midi.py", filePath, outputPath)
-		cmd.Dir = "./"
-		cmdErr = cmd.Run()
-		midiOutput = outputPath
+		// Prepare JSON payload
+		payload := map[string]interface{}{
+			"input_audio": absInput,
+			"output_midi": absOutput,
+			"stem":        "other",
+		}
+		fmt.Printf("%+v\n", payload)
+		jsonPayload, _ := json.Marshal(payload)
+
+		// WebSocket connection (replace wsURL with your actual WebSocket server URL)
+		wsURL := "ws://localhost:8765" // <-- CHANGE THIS to your actual WebSocket server URL
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			wsErr = fmt.Errorf("websocket dial error: %w", err)
+			fmt.Printf("WebSocket dial error: %v\n", wsErr)
+		} else {
+			defer conn.Close()
+			err = conn.WriteMessage(websocket.TextMessage, jsonPayload)
+			if err != nil {
+				wsErr = fmt.Errorf("websocket write error: %w", err)
+				fmt.Printf("WebSocket write error: %v\n", wsErr)
+			} else {
+				_, msg, err := conn.ReadMessage()
+				if err != nil {
+					wsErr = fmt.Errorf("websocket read error: %w", err)
+					fmt.Printf("WebSocket read error: %v\n", wsErr)
+				} else {
+					wsResp = string(msg)
+				}
+			}
+		}
 	}
 
 	resp := fiber.Map{
@@ -87,11 +119,11 @@ func UploadFile(c *fiber.Ctx) error {
 
 	if filepath.Ext(uniqueFilename) == ".wav" {
 		resp["audio2midi"] = fiber.Map{
-			"output_file": midiOutput,
-			"error":       nil,
+			"websocket_response": wsResp,
+			"error":              nil,
 		}
-		if cmdErr != nil {
-			resp["audio2midi"].(fiber.Map)["error"] = cmdErr.Error()
+		if wsErr != nil {
+			resp["audio2midi"].(fiber.Map)["error"] = wsErr.Error()
 		}
 	}
 
